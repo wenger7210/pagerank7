@@ -208,6 +208,55 @@
             font-size: 13px;
             line-height: 1.5;
         }
+
+
+        #pagerank-section {
+            margin-top: 45px;
+            overflow-x: auto;
+            padding-top: 10px;
+            border-top: 2px dashed #dfe4ea;
+        }
+
+        .pagerank-control {
+            max-width: 760px;
+            margin: 15px auto;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #eef7ff;
+            border: 1px solid #b7ddff;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .pagerank-control input[type="number"] {
+            padding: 8px;
+            width: 90px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 15px;
+            margin: 0 5px;
+            text-align: center;
+        }
+
+        .pagerank-note {
+            margin-top: 8px;
+            color: #555;
+            font-size: 12px;
+        }
+
+        .matrix-block {
+            margin-top: 25px;
+        }
+
+        .matrix-block h3 {
+            margin-bottom: 5px;
+            color: #2f3542;
+        }
+
+        .rank-cell {
+            background-color: #e8f5e9;
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -252,6 +301,28 @@
             <h2>📊 실시간 좋아요 빈도 행렬 (Sociomatrix)</h2>
             <div id="matrix-container"></div>
         </div>
+
+        <div id="pagerank-section">
+            <h2>🔢 PageRank 계산</h2>
+            <div class="pagerank-control">
+                <div>
+                    좋아요 빈도 행렬을 <strong>행렬 M</strong>으로 만들고, 각 열의 합으로 나누어 <strong>전이행렬 A</strong>를 만듭니다.
+                </div>
+                <div style="margin-top: 10px;">
+                    <label for="power-input"><strong>A의 거듭제곱 지수</strong></label>
+                    <input type="number" id="power-input" min="1" max="100" value="10">
+                    <button id="calculate-pagerank-btn" style="background-color:#0984e3;">Aⁿ × B 계산</button>
+                </div>
+                <div class="pagerank-note">
+                    ※ B는 참여 학생 수를 m이라 할 때, 모든 성분이 1/m인 m×1 초기 행렬입니다.<br>
+                    ※ 어떤 학생이 아무에게도 좋아요를 보내지 않아 열의 합이 0이면, 그 열은 모든 학생에게 1/m씩 이동하는 것으로 처리합니다.
+                </div>
+            </div>
+            <div id="pagerank-container">
+                <p style="text-align:center; color:#999;">거듭제곱 지수를 입력한 뒤 계산 버튼을 누르세요.</p>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -279,13 +350,13 @@
     */
 
     const firebaseConfig = {
-  apiKey: "AIzaSyCnUl4t797Z5dKGMSQiKXUOBNtq-1p7oqY",
-  authDomain: "pagerank7-23c31.firebaseapp.com",
-  projectId: "pagerank7-23c31",
-  storageBucket: "pagerank7-23c31.firebasestorage.app",
-  messagingSenderId: "895530595887",
-  appId: "1:895530595887:web:f1df99c349b1764e4478da",
-  measurementId: "G-TQX13WRGL7"
+  apiKey: "AIzaSyBg80XBAfwsyfu5F2iIpF8AxC4Zf-a6tdo",
+  authDomain: "pagerank7-ffcb7.firebaseapp.com",
+  projectId: "pagerank7-ffcb7",
+  storageBucket: "pagerank7-ffcb7.firebasestorage.app",
+  messagingSenderId: "754773056056",
+  appId: "1:754773056056:web:8b67575fac532d4012e4cd",
+  measurementId: "G-1YPGH7E9EV"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -768,6 +839,244 @@
         container.innerHTML = tableHTML;
     }
 
+
+
+    function getSortedUsers() {
+        return Object.keys(localAppData).sort((a, b) => a.localeCompare(b, "ko"));
+    }
+
+    function buildLikeMatrix(users) {
+        return users.map(receiver => {
+            const receiverLikes = (localAppData[receiver] && localAppData[receiver].likes) || {};
+
+            return users.map(sender => {
+                if (sender === receiver) return 0;
+                return Number(receiverLikes[sender] || 0);
+            });
+        });
+    }
+
+    function buildTransitionMatrix(M) {
+        const size = M.length;
+        const A = Array.from({ length: size }, () => Array(size).fill(0));
+        const danglingColumns = [];
+
+        for (let col = 0; col < size; col++) {
+            let columnSum = 0;
+
+            for (let row = 0; row < size; row++) {
+                columnSum += Number(M[row][col] || 0);
+            }
+
+            if (columnSum === 0) {
+                danglingColumns.push(col);
+
+                for (let row = 0; row < size; row++) {
+                    A[row][col] = 1 / size;
+                }
+            } else {
+                for (let row = 0; row < size; row++) {
+                    A[row][col] = Number(M[row][col] || 0) / columnSum;
+                }
+            }
+        }
+
+        return { A, danglingColumns };
+    }
+
+    function multiplyMatrices(left, right) {
+        const rows = left.length;
+        const inner = right.length;
+        const cols = right[0].length;
+        const result = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+        for (let i = 0; i < rows; i++) {
+            for (let j = 0; j < cols; j++) {
+                let sum = 0;
+
+                for (let k = 0; k < inner; k++) {
+                    sum += left[i][k] * right[k][j];
+                }
+
+                result[i][j] = sum;
+            }
+        }
+
+        return result;
+    }
+
+    function identityMatrix(size) {
+        return Array.from({ length: size }, (_, row) => {
+            return Array.from({ length: size }, (_, col) => row === col ? 1 : 0);
+        });
+    }
+
+    function matrixPower(matrix, exponent) {
+        let result = identityMatrix(matrix.length);
+        let base = matrix.map(row => row.slice());
+        let power = exponent;
+
+        while (power > 0) {
+            if (power % 2 === 1) {
+                result = multiplyMatrices(result, base);
+            }
+
+            base = multiplyMatrices(base, base);
+            power = Math.floor(power / 2);
+        }
+
+        return result;
+    }
+
+    function multiplyMatrixVector(matrix, vector) {
+        return matrix.map(row => {
+            let sum = 0;
+
+            for (let i = 0; i < vector.length; i++) {
+                sum += row[i] * vector[i];
+            }
+
+            return sum;
+        });
+    }
+
+    function formatNumber(value) {
+        const rounded = Math.round((Number(value) + Number.EPSILON) * 10000) / 10000;
+        return rounded.toFixed(4).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+    }
+
+    function renderSimpleMatrix(title, description, users, matrix, options = {}) {
+        let html = `<div class="matrix-block"><h3>${title}</h3>`;
+
+        if (description) {
+            html += `<p style="font-size:13px; color:#555; margin-top:0;">${description}</p>`;
+        }
+
+        html += "<table><tr><th>행 \\ 열</th>";
+
+        users.forEach(user => {
+            html += `<th>${escapeHTML(user)}</th>`;
+        });
+
+        html += "</tr>";
+
+        matrix.forEach((row, rowIndex) => {
+            html += `<tr><th>${escapeHTML(users[rowIndex])}</th>`;
+
+            row.forEach((value, colIndex) => {
+                const cellClass = options.highlightSelf && rowIndex === colIndex ? "self-cell" : "";
+                html += `<td class="${cellClass}">${formatNumber(value)}</td>`;
+            });
+
+            html += "</tr>";
+        });
+
+        html += "</table></div>";
+        return html;
+    }
+
+    function renderColumnVector(title, description, users, vector) {
+        let html = `<div class="matrix-block"><h3>${title}</h3>`;
+
+        if (description) {
+            html += `<p style="font-size:13px; color:#555; margin-top:0;">${description}</p>`;
+        }
+
+        html += "<table><tr><th>학생</th><th>값</th></tr>";
+
+        users.forEach((user, index) => {
+            html += `<tr><th>${escapeHTML(user)}</th><td class="rank-cell">${formatNumber(vector[index])}</td></tr>`;
+        });
+
+        html += "</table></div>";
+        return html;
+    }
+
+    function calculatePageRank() {
+        const container = document.getElementById('pagerank-container');
+        const powerInput = document.getElementById('power-input');
+        const users = getSortedUsers();
+        const size = users.length;
+
+        if (size === 0) {
+            container.innerHTML = "<p style='text-align:center; color:#999;'>참여 중인 학생이 없습니다.</p>";
+            return;
+        }
+
+        const exponent = Number(powerInput.value);
+
+        if (!Number.isInteger(exponent) || exponent < 1 || exponent > 100) {
+            alert("A의 거듭제곱 지수는 1 이상 100 이하의 자연수로 입력해주세요.");
+            return;
+        }
+
+        const M = buildLikeMatrix(users);
+        const transitionResult = buildTransitionMatrix(M);
+        const A = transitionResult.A;
+        const poweredA = matrixPower(A, exponent);
+        const B = Array(size).fill(1 / size);
+        const pageRank = multiplyMatrixVector(poweredA, B);
+
+        const sortedRanks = users
+            .map((user, index) => ({ user, value: pageRank[index] }))
+            .sort((a, b) => b.value - a.value);
+
+        let html = "";
+
+        if (transitionResult.danglingColumns.length > 0) {
+            const danglingNames = transitionResult.danglingColumns.map(index => escapeHTML(users[index])).join(", ");
+            html += `<div class="info-box" style="background:#fffbe6; border-color:#ffe58f; color:#614700;">열의 합이 0인 학생이 있어 해당 열은 1/${size}로 균등 처리했습니다: ${danglingNames}</div>`;
+        }
+
+        html += renderSimpleMatrix(
+            "1. 좋아요 빈도 행렬 M",
+            "행은 받은 사람, 열은 보낸 사람입니다. 즉 M의 (i, j) 성분은 j 학생이 i 학생에게 보낸 좋아요 수입니다.",
+            users,
+            M,
+            { highlightSelf: true }
+        );
+
+        html += renderSimpleMatrix(
+            "2. 전이행렬 A",
+            "M의 각 성분을 그 성분이 속한 열의 합으로 나눈 행렬입니다. 따라서 각 열의 합은 1이 됩니다.",
+            users,
+            A,
+            { highlightSelf: false }
+        );
+
+        html += renderSimpleMatrix(
+            `3. A<sup>${exponent}</sup>`,
+            `전이행렬 A를 ${exponent}번 곱한 결과입니다.`,
+            users,
+            poweredA,
+            { highlightSelf: false }
+        );
+
+        html += renderColumnVector(
+            "4. 초기 행렬 B",
+            `참여 학생 수가 ${size}명이므로 모든 성분을 1/${size}로 둔 ${size}×1 행렬입니다.`,
+            users,
+            B
+        );
+
+        html += renderColumnVector(
+            `5. PageRank 결과: A<sup>${exponent}</sup> × B`,
+            "값이 클수록 전체 좋아요 연결망 안에서 상대적으로 더 높은 중요도를 가진 것으로 볼 수 있습니다.",
+            users,
+            pageRank
+        );
+
+        html += "<div class='matrix-block'><h3>🏆 PageRank 순위</h3><table><tr><th>순위</th><th>학생</th><th>PageRank</th></tr>";
+
+        sortedRanks.forEach((item, index) => {
+            html += `<tr><td>${index + 1}</td><th>${escapeHTML(item.user)}</th><td class="rank-cell">${formatNumber(item.value)}</td></tr>`;
+        });
+
+        html += "</table></div>";
+
+        container.innerHTML = html;
+    }
+
     function escapeHTML(text) {
         return String(text)
             .replace(/&/g, "&amp;")
@@ -782,6 +1091,7 @@
     document.getElementById('delete-btn').addEventListener('click', deleteMyImage);
     document.getElementById('reset-all-btn').addEventListener('click', resetAllData);
     document.getElementById('logout-btn').addEventListener('click', logout);
+    document.getElementById('calculate-pagerank-btn').addEventListener('click', calculatePageRank);
 
     nicknameInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') login();
